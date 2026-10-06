@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#EDEFE6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#191B16" media="(prefers-color-scheme: dark)">
+<title>Pousse, la météo des champignons</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,500;0,700;1,400&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#EDEFE6; --surface:#F7F8F2; --ink:#2A241D; --muted:#6B6458; --line:#D3D7C6;
+  --cep:#7B4A26; --moss:#4E7536; --ochre:#B07D14; --pale:#A39B86; --bark:#C4BEAE; --rain:#3F6E8C;
+  --serif:"Spectral", Georgia, "Times New Roman", serif;
+  --sans:"Public Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#191B16; --surface:#22251E; --ink:#E8E5DA; --muted:#A39E90; --line:#363A2E;
+    --cep:#D19A66; --moss:#8DB86A; --ochre:#E2B24C; --pale:#8C8676; --bark:#4A4B42; --rain:#7FAAC8;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+  font-size:16px; line-height:1.5;
+  padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);
+}
+main{max-width:560px; margin:0 auto; padding:28px 18px 40px}
+h1{font-family:var(--serif); font-weight:700; font-size:2.6rem; line-height:1; margin:0 0 8px; letter-spacing:-.01em}
+.lede{margin:0 0 24px; color:var(--muted); max-width:44ch}
+label{display:block; font-weight:600; font-size:.95rem; margin-bottom:6px}
+.search{display:flex; gap:8px; position:relative}
+input[type=search]{
+  flex:1; min-width:0; font:inherit; color:var(--ink); background:var(--surface);
+  border:1.5px solid var(--line); border-radius:10px; padding:11px 12px;
+}
+input[type=search]:focus{outline:none; border-color:var(--cep)}
+button{font:inherit; color:inherit; cursor:pointer}
+.icon-btn{
+  flex:none; width:48px; border:1.5px solid var(--line); background:var(--surface);
+  border-radius:10px; display:grid; place-items:center; color:var(--cep);
+}
+.icon-btn svg{width:22px; height:22px}
+:focus-visible{outline:2.5px solid var(--cep); outline-offset:2px}
+#sugg{
+  list-style:none; margin:6px 0 0; padding:4px; background:var(--surface);
+  border:1.5px solid var(--line); border-radius:10px; position:absolute; left:0; right:56px; top:100%; z-index:5;
+  box-shadow:0 8px 24px rgba(42,36,29,.12);
+}
+#sugg li{padding:10px 10px; border-radius:7px; cursor:pointer}
+#sugg li[aria-selected=true], #sugg li:hover{background:var(--bg)}
+#sugg small{color:var(--muted)}
+.alt{margin-top:18px}
+.alt label{display:flex; justify-content:space-between; align-items:baseline}
+.alt output{font-family:var(--serif); font-size:1.25rem; font-weight:500}
+input[type=range]{width:100%; accent-color:var(--cep); margin:4px 0 2px; height:28px}
+.hint{margin:0; font-size:.85rem; color:var(--muted)}
+#status{margin:16px 0 0; font-size:.9rem; color:var(--muted)}
+#status:empty{display:none}
+#status.err{color:var(--cep); font-weight:500}
+#status button{margin-left:8px; border:1.5px solid currentColor; background:none; border-radius:8px; padding:2px 10px}
+
+.best{margin:18px 0 26px; padding:16px 0 0; border-top:2px solid var(--ink)}
+.best p{margin:0; font-family:var(--serif); font-size:1.35rem; line-height:1.3}
+.best .sub{font-family:var(--sans); font-size:.9rem; color:var(--muted); margin-top:6px}
+
+.plate{padding:18px 0 20px; border-top:1px solid var(--line)}
+.plate-head{display:flex; justify-content:space-between; align-items:flex-start; gap:12px}
+.plate h2{font-family:var(--serif); font-weight:500; font-size:1.35rem; line-height:1.2; margin:0}
+.latin{font-family:var(--serif); font-style:italic; color:var(--muted); font-size:.95rem; margin:2px 0 0}
+.score-big{text-align:right; flex:none}
+.score-big b{font-family:var(--serif); font-weight:700; font-size:2rem; line-height:1; display:block}
+.score-big span{font-size:.8rem; color:var(--muted)}
+.lvl-4{color:var(--moss)} .lvl-3{color:var(--ochre)} .lvl-2{color:var(--pale)} .lvl-1{color:var(--pale)}
+
+.days{display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin:14px 0 4px}
+.day{
+  border:none; background:none; padding:2px 0 6px; border-radius:8px;
+  display:flex; flex-direction:column; align-items:center; gap:0;
+}
+.day svg{width:100%; max-width:42px; height:54px; display:block}
+.day .d{font-size:.72rem; color:var(--muted); line-height:1.2}
+.day .n{font-size:.8rem; font-weight:600; line-height:1.2}
+.day[aria-pressed=true]{background:var(--surface); box-shadow:inset 0 0 0 1.5px var(--line)}
+.day.far{opacity:.55}
+.ground{stroke:var(--line); stroke-width:1.5}
+.f-4{fill:var(--moss)} .f-3{fill:var(--ochre)} .f-2{fill:var(--pale)} .f-1{fill:var(--bark)}
+.stem{fill:var(--surface); stroke:var(--pale); stroke-width:1}
+
+details{margin-top:6px}
+summary{cursor:pointer; color:var(--cep); font-weight:500; font-size:.92rem; padding:6px 0; list-style-position:inside}
+.why{margin:6px 0 0; padding:0; list-style:none}
+.why li{display:grid; grid-template-columns:7.2rem 1fr; gap:4px 12px; padding:9px 0; border-bottom:1px dotted var(--line); font-size:.9rem}
+.why li:last-child{border-bottom:none}
+.why .k{font-weight:600; display:block}
+.meter{display:block; height:5px; background:var(--line); border-radius:3px; margin-top:7px; overflow:hidden; max-width:6.5rem}
+.meter i{display:block; height:100%; background:var(--cep); border-radius:3px}
+.why .t{color:var(--muted)}
+.why .warn{grid-column:1 / -1; color:var(--cep)}
+.conf{font-size:.82rem; color:var(--muted); margin:8px 0 0}
+
+.weather{margin-top:24px; border-top:2px solid var(--ink); padding-top:6px}
+.weather summary{font-size:1rem}
+.wx-svg{width:100%; height:auto; display:block; margin:10px 0 4px}
+.wx-bar{fill:var(--rain)} .wx-bar.fc{fill:var(--rain); opacity:.45}
+.wx-line{fill:none; stroke:var(--cep); stroke-width:1.8}
+.wx-today{stroke:var(--ink); stroke-width:1; stroke-dasharray:3 3}
+.wx-txt{font-family:var(--sans); font-size:9px; fill:var(--muted)}
+.legend{display:flex; flex-wrap:wrap; gap:6px 16px; font-size:.82rem; color:var(--muted); margin:2px 0 10px}
+.legend span::before{content:""; display:inline-block; width:10px; height:10px; margin-right:6px; vertical-align:-1px; border-radius:2px; background:var(--c)}
+.legend .lg-fc::before{opacity:.45}
+.totals{margin:0; padding:0; list-style:none; font-size:.9rem}
+.totals li{display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dotted var(--line)}
+.totals b{font-weight:600}
+
+footer{margin-top:34px; font-size:.82rem; color:var(--muted)}
+footer p{margin:0 0 10px; max-width:60ch}
+footer strong{color:var(--ink); font-weight:600}
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+@media (prefers-reduced-motion: no-preference){
+  .plate{animation:rise .35s ease-out both}
+  @keyframes rise{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+}
+@media (min-width:480px){ h1{font-size:3rem} }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Pousse</h1>
+    <p class="lede">Les chances de trouver cèpes, girolles et pieds de mouton, calculées d'après la météo des trois dernières semaines et des sept prochains jours.</p>
+  </header>
+
+  <section aria-label="Lieu de cueillette">
+    <label for="q">Commune</label>
+    <div class="search">
+      <input id="q" type="search" placeholder="Montferrier, Mazamet, Saint-Girons…" autocomplete="off" enterkeyhint="search" role="combobox" aria-expanded="false" aria-controls="sugg" aria-autocomplete="list">
+      <button id="gps" class="icon-btn" type="button" aria-label="Utiliser ma position">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+      </button>
+      <ul id="sugg" role="listbox" hidden></ul>
+    </div>
+    <div class="alt">
+      <label for="alt">Altitude de ton coin <output id="altOut" for="alt">–</output></label>
+      <input id="alt" type="range" min="0" max="2400" step="50" value="800">
+      <p class="hint" id="altHint">Règle l'altitude de la forêt où tu cherches, pas celle du village.</p>
+    </div>
+  </section>
+
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <section id="results" hidden aria-label="Résultats">
+    <div class="best" id="best"></div>
+    <div id="plates"></div>
+    <details class="weather">
+      <summary>Météo des trois dernières semaines et prévisions</summary>
+      <div id="wx"></div>
+    </details>
+  </section>
+
+  <footer>
+    <p id="updated"></p>
+    <p>Données Open-Meteo, modèles Météo-France AROME et ARPEGE corrigés à l'altitude choisie. Indice indicatif construit sur des repères de cueilleurs : il donne une tendance, pas une garantie.</p>
+    <p><strong>Ne mange jamais un champignon sans identification certaine.</strong> En cas de doute, fais-le vérifier par un pharmacien ou une société mycologique.</p>
+  </footer>
+</main>
+
+<script id="engine">
+/* ===== Moteur de calcul (aucune dépendance au DOM) ===== */
+const Engine = (() => {
+  const clamp = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+  const avg = arr => { const v = arr.filter(x => x != null && !isNaN(x)); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+
+  /* Profils de départ : repères empiriques de cueilleurs, ajustables.
+     season : poids par mois (1 = janvier) ; soil : plage idéale de température du sol à 6 cm (°C) ;
+     lag : délai idéal (jours) après la fin d'un épisode pluvieux ; water : pluie utile visée (mm) ;
+     heatMax : maximale au-delà de laquelle le sol sèche trop ; frost : minimale sous laquelle la pousse est freinée ;
+     shock : un rafraîchissement net joue le rôle de déclencheur. */
+  const SPECIES = [
+    { id: "cepes_ete", name: "Cèpes d'été et têtes de nègre", latin: "Boletus aestivalis, B. aereus",
+      season: {5:.3, 6:.8, 7:1, 8:1, 9:.8, 10:.3}, soil: [15, 21], lag: [7, 12], water: 15, heatMax: 33, frost: 3, shock: false },
+    { id: "cepes_aut", name: "Cèpes d'automne et cèpes des pins", latin: "Boletus edulis, B. pinophilus",
+      season: {8:.4, 9:1, 10:1, 11:.7, 12:.15}, soil: [9, 15], lag: [9, 15], water: 15, heatMax: 28, frost: -1, shock: true },
+    { id: "girolles", name: "Girolles", latin: "Cantharellus cibarius",
+      season: {5:.3, 6:.8, 7:1, 8:1, 9:1, 10:.8, 11:.4}, soil: [11, 19], lag: [6, 10], water: 20, heatMax: 30, frost: 0, shock: false },
+    { id: "pieds", name: "Pieds de mouton", latin: "Hydnum repandum",
+      season: {9:.6, 10:1, 11:1, 12:.6, 1:.2}, soil: [6, 13], lag: [10, 16], water: 15, heatMax: 26, frost: -3, shock: false },
+  ];
+
+  const EPISODE_MM = 15;   // pluie cumulée minimale d'un épisode
+  const RAIN_DAY = 2;      // un jour compte comme pluvieux à partir de 2 mm
+
+  /* Fusionne la réponse Météo-France (a) et la réponse par défaut (b, qui porte les données de sol). */
+  function mergeData(a, b) {
+    const okA = a && a.daily && a.daily.time, okB = b && b.daily && b.daily.time;
+    if (!okA && !okB) throw new Error("Aucune donnée météo reçue.");
+    const time = (okB ? b : a).daily.time;
+    const idxA = okA ? new Map(a.daily.time.map((t, i) => [t, i])) : new Map();
+    const idxB = okB ? new Map(b.daily.time.map((t, i) => [t, i])) : new Map();
+    const pick = key => time.map(t => {
+      if (okA && a.daily[key] && idxA.has(t)) { const v = a.daily[key][idxA.get(t)]; if (v != null) return v; }
+      if (okB && b.daily[key] && idxB.has(t)) { const v = b.daily[key][idxB.get(t)]; if (v != null) return v; }
+      return null;
+    });
+    const hourlyMean = key => {
+      if (!b || !b.hourly || !b.hourly[key]) return time.map(() => null);
+      const acc = {};
+      b.hourly.time.forEach((ts, i) => { const v = b.hourly[key][i]; if (v == null) return; const d = ts.slice(0, 10); (acc[d] = acc[d] || []).push(v); });
+      return time.map(t => acc[t] ? avg(acc[t]) : null);
+    };
+    const tmin = pick("temperature_2m_min"), tmax = pick("temperature_2m_max");
+    const tmean = pick("temperature_2m_mean").map((v, i) => v != null ? v : (tmin[i] != null && tmax[i] != null ? (tmin[i] + tmax[i]) / 2 : null));
+    return {
+      time, tmin, tmax, tmean,
+      rain: pick("precipitation_sum"),
+      prob: pick("precipitation_probability_max"),
+      et0: pick("et0_fao_evapotranspiration"),
+      soilT: hourlyMean("soil_temperature_6cm"),
+      soilM: hourlyMean("soil_moisture_3_to_9cm"),
+      elevation: okB && b.elevation != null ? b.elevation : (okA ? a.elevation : null),
+      hasMF: !!okA,
+    };
+  }
+
+  /* Un épisode = une suite de jours pluvieux (>= 2 mm) totalisant au moins 15 mm.
+     Sa date de référence est le dernier jour pluvieux de la suite. */
+  function findEpisodes(D) {
+    const eps = []; let start = -1, sum = 0, probMax = null;
+    for (let i = 0; i <= D.rain.length; i++) {
+      const v = i < D.rain.length ? (D.rain[i] || 0) : 0;
+      if (v >= RAIN_DAY) {
+        if (start < 0) { start = i; sum = 0; probMax = null; }
+        sum += v;
+        if (D.prob[i] != null) probMax = Math.max(probMax ?? 0, D.prob[i]);
+      } else if (start >= 0) {
+        if (sum >= EPISODE_MM) eps.push({ start, end: i - 1, mm: sum, days: i - start, prob: probMax });
+        start = -1;
+      }
+    }
+    return eps;
+  }
+
+  const trap = (x, lo, hi, ramp) => x >= lo && x <= hi ? 1 : x < lo ? clamp(1 - (lo - x) / ramp) : clamp(1 - (x - hi) / ramp);
+
+  function scoreDay(D, d, sp, eps) {
+    // 1. Réserve en eau : pluie moins une part de l'évapotranspiration, pondérée sur 21 jours.
+    let m = 0;
+    for (let k = 0; k <= 20; k++) {
+      const i = d - k; if (i < 0) break;
+      const w = Math.exp(-k / 14);
+      m += w * ((D.rain[i] || 0) - 0.35 * (D.et0[i] != null ? D.et0[i] : 1.5));
+    }
+    let W = clamp(m / sp.water);
+    const sm = D.soilM[d]; let smPct = null;
+    if (sm != null) { W = 0.5 * W + 0.5 * clamp((sm - 0.15) / 0.20); smPct = Math.round(sm * 100); }
+
+    // 2. Température du sol (estimée d'après l'air si le sol manque).
+    let st = D.soilT[d], stEst = false;
+    if (st == null) { st = avg(D.tmean.slice(Math.max(0, d - 4), d + 1)); stEst = true; }
+    const T = st == null ? 0.5 : trap(st, sp.soil[0], sp.soil[1], 4);
+
+    // 3. Déclencheur : délai depuis le dernier épisode pluvieux, plus le choc thermique.
+    let Tr = 0, ep = null;
+    const [a, b] = sp.lag;
+    for (const e of eps) {
+      if (e.end > d) continue;
+      const lag = d - e.end;
+      let s = lag < a - 4 ? 0 : lag < a ? (lag - (a - 4)) / 4 : lag <= b ? 1 : lag <= b + 6 ? 1 - (lag - b) / 6 : 0;
+      s *= clamp(e.mm / 25, 0.6, 1);
+      if (s > Tr) { Tr = s; ep = { ...e, lag }; }
+    }
+    let shock = null;
+    if (sp.shock && d >= 10) {
+      const rec = avg(D.tmean.slice(d - 2, d + 1)), bef = avg(D.tmean.slice(d - 10, d - 4));
+      if (rec != null && bef != null && bef - rec >= 2) { shock = bef - rec; Tr = Math.min(1, Tr + clamp((shock - 2) / 4) * 0.35); }
+    }
+
+    // 4. Saison.
+    const S = sp.season[+D.time[d].slice(5, 7)] || 0;
+
+    // 5. Pénalités : gel et forte chaleur sur les 4 derniers jours.
+    const win = arr => arr.slice(Math.max(0, d - 3), d + 1).filter(x => x != null);
+    const mins = win(D.tmin), maxs = win(D.tmax);
+    const tminR = mins.length ? Math.min(...mins) : null, tmaxR = maxs.length ? Math.max(...maxs) : null;
+    const frostF = tminR != null && tminR < sp.frost ? clamp(1 - (sp.frost - tminR) / 3 * 0.8, 0.2, 1) : 1;
+    const heatF = tmaxR != null && tmaxR > sp.heatMax ? clamp(1 - (tmaxR - sp.heatMax) / 5 * 0.4, 0.6, 1) : 1;
+
+    // La saison module l'indice (multiplicateur) plutôt que de s'y ajouter.
+    let score = 100 * (0.45 * W + 0.33 * T + 0.22 * Tr) * (0.35 + 0.65 * S) * frostF * heatF;
+    if (W < 0.25) score = Math.min(score, 8 + W * 48);   // sans eau, pas de pousse (20 au maximum)
+    if (S === 0) score = Math.min(score, 10);            // hors saison
+    return { d, score: Math.round(score), W, T, Tr, S, m, smPct, st, stEst, ep, shock, tminR, tmaxR, frostF, heatF };
+  }
+
+  function todayIndex(time, now = new Date()) {
+    const p = n => String(n).padStart(2, "0");
+    const t = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+    const i = time.indexOf(t);
+    return i >= 0 ? i : Math.max(0, time.length - 8);
+  }
+
+  function compute(D, now) {
+    const today = todayIndex(D.time, now);
+    const eps = findEpisodes(D);
+    const last = Math.min(D.time.length - 1, today + 6);
+    const species = SPECIES.map(sp => {
+      const days = [];
+      for (let d = today; d <= last; d++) days.push(scoreDay(D, d, sp, eps));
+      const best = days.reduce((x, y) => y.score > x.score ? y : x, days[0]);
+      return { sp, days, best };
+    });
+    return { today, eps, species };
+  }
+
+  const level = s => s >= 65 ? 4 : s >= 45 ? 3 : s >= 25 ? 2 : 1;
+  const LEVEL_TXT = { 4: "Très favorable", 3: "Favorable", 2: "Possible", 1: "Peu probable" };
+
+  return { SPECIES, mergeData, findEpisodes, scoreDay, compute, todayIndex, level, LEVEL_TXT, avg };
+})();
+if (typeof module !== "undefined") module.exports = Engine;
+</script>
+
+<script id="ui">
+/* ===== Interface ===== */
+(() => {
+  const $ = s => document.querySelector(s);
+  const API = "https://api.open-meteo.com/v1/forecast";
+  const GEO = "https://geocoding-api.open-meteo.com/v1/search";
+  const STORE = "pousse:v2";
+  const DEFAULT_PLACE = { name: "Montferrier", admin: "Ariège", lat: 42.8667, lon: 1.7833, village: null };
+
+  let state = { place: null, alt: null, data: null, fetchedAt: null, selected: {} };
+
+  /* ---------- Stockage local (facultatif) ---------- */
+  const save = () => { try { localStorage.setItem(STORE, JSON.stringify({ place: state.place, alt: state.alt, data: state.data, fetchedAt: state.fetchedAt })); } catch (e) {} };
+  const load = () => { try { return JSON.parse(localStorage.getItem(STORE) || "null"); } catch (e) { return null; } };
+
+  /* ---------- Dates ---------- */
+  const parseDay = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); };
+  const fmtShort = s => parseDay(s).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" });
+  const fmtLong = s => parseDay(s).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  const fmtDM = s => parseDay(s).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+
+  /* ---------- Statut ---------- */
+  function status(msg, isErr = false, retry = false) {
+    const el = $("#status");
+    el.className = isErr ? "err" : "";
+    el.textContent = msg;
+    if (retry) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = "Réessayer";
+      b.onclick = () => fetchWeather();
+      el.appendChild(b);
+    }
+  }
+
+  /* ---------- Altitude ---------- */
+  const altInput = $("#alt"), altOut = $("#altOut");
+  function setAlt(v, fromUser = false) {
+    state.alt = Math.round(v / 50) * 50;
+    altInput.value = state.alt;
+    altOut.textContent = `${state.alt} m`;
+    const v0 = state.place && state.place.village;
+    $("#altHint").textContent = v0 != null
+      ? `Village à ${Math.round(v0)} m. Règle l'altitude de la forêt où tu cherches.`
+      : "Règle l'altitude de la forêt où tu cherches, pas celle du village.";
+    if (fromUser) { clearTimeout(setAlt.t); setAlt.t = setTimeout(fetchWeather, 500); }
+  }
+  altInput.addEventListener("input", () => setAlt(+altInput.value, true));
+
+  /* ---------- Recherche de commune ---------- */
+  const q = $("#q"), sugg = $("#sugg");
+  let results = [], active = -1, geoTimer = null, geoCtl = null;
+
+  function closeSugg() { sugg.hidden = true; q.setAttribute("aria-expanded", "false"); active = -1; }
+  function renderSugg() {
+    sugg.innerHTML = "";
+    results.forEach((r, i) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", i === active ? "true" : "false");
+      li.append(r.name + " ");
+      const sm = document.createElement("small");
+      sm.textContent = [r.admin2 || r.admin1, r.elevation != null ? `${Math.round(r.elevation)} m` : null].filter(Boolean).join(", ");
+      li.append(sm);
+      li.addEventListener("mousedown", e => { e.preventDefault(); choose(i); });
+      sugg.appendChild(li);
+    });
+    sugg.hidden = !results.length;
+    q.setAttribute("aria-expanded", results.length ? "true" : "false");
+  }
+  async function geocode(text) {
+    if (geoCtl) geoCtl.abort();
+    geoCtl = new AbortController();
+    const url = `${GEO}?name=${encodeURIComponent(text)}&count=8&language=fr&countryCode=FR&format=json`;
+    try {
+      const r = await fetch(url, { signal: geoCtl.signal });
+      const j = await r.json();
+      results = (j.results || []).sort((x, y) => (y.admin1 === "Occitanie") - (x.admin1 === "Occitanie"));
+      active = results.length ? 0 : -1;
+      renderSugg();
+    } catch (e) { if (e.name !== "AbortError") { results = []; renderSugg(); } }
+  }
+  q.addEventListener("input", () => {
+    clearTimeout(geoTimer);
+    const t = q.value.trim();
+    if (t.length < 2) { results = []; closeSugg(); return; }
+    geoTimer = setTimeout(() => geocode(t), 280);
+  });
+  q.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown" && results.length) { active = (active + 1) % results.length; renderSugg(); e.preventDefault(); }
+    else if (e.key === "ArrowUp" && results.length) { active = (active - 1 + results.length) % results.length; renderSugg(); e.preventDefault(); }
+    else if (e.key === "Enter") { e.preventDefault(); if (results.length) choose(Math.max(0, active)); }
+    else if (e.key === "Escape") closeSugg();
+  });
+  q.addEventListener("blur", () => setTimeout(closeSugg, 150));
+
+  function choose(i) {
+    const r = results[i]; if (!r) return;
+    state.place = { name: r.name, admin: r.admin2 || r.admin1 || "", lat: r.latitude, lon: r.longitude, village: r.elevation != null ? r.elevation : null };
+    q.value = r.name + (state.place.admin ? `, ${state.place.admin}` : "");
+    closeSugg(); q.blur();
+    state.selected = {};
+    setAlt(state.place.village != null ? state.place.village : 800);
+    fetchWeather(state.place.village == null);
+  }
+
+  /* ---------- Géolocalisation ---------- */
+  $("#gps").addEventListener("click", () => {
+    if (!navigator.geolocation) { status("Ce navigateur ne permet pas la géolocalisation.", true); return; }
+    status("Recherche de ta position…");
+    navigator.geolocation.getCurrentPosition(pos => {
+      state.place = { name: "Ma position", admin: "", lat: +pos.coords.latitude.toFixed(4), lon: +pos.coords.longitude.toFixed(4), village: null };
+      q.value = "Ma position";
+      state.selected = {};
+      fetchWeather(true);
+    }, err => {
+      status(err.code === 1 ? "Position refusée. Autorise la localisation ou tape une commune." : "Position introuvable. Tape une commune.", true);
+    }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 });
+  });
+
+  /* ---------- Météo ---------- */
+  function buildUrl(p, alt, model, withSoil) {
+    const daily = "precipitation_sum,precipitation_probability_max,temperature_2m_min,temperature_2m_max,temperature_2m_mean,et0_fao_evapotranspiration";
+    const params = new URLSearchParams({ latitude: p.lat, longitude: p.lon, daily, past_days: 21, forecast_days: 8, timezone: "Europe/Paris" });
+    if (alt != null) params.set("elevation", alt);
+    if (model) params.set("models", model);
+    if (withSoil) params.set("hourly", "soil_temperature_6cm,soil_moisture_3_to_9cm");
+    return `${API}?${params}`;
+  }
+  const getJSON = async url => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    if (j.error) throw new Error(j.reason || "Erreur API");
+    return j;
+  };
+
+  /* autoAlt : la première fois pour un point sans altitude connue, on laisse Open-Meteo
+     donner l'altitude du terrain, puis on l'utilise comme valeur de départ du curseur. */
+  async function fetchWeather(autoAlt = false) {
+    if (!state.place) return;
+    status("Chargement de la météo…");
+    const alt = autoAlt ? null : state.alt;
+    try {
+      const [mf, def] = await Promise.allSettled([
+        getJSON(buildUrl(state.place, alt, "meteofrance_seamless", false)),
+        getJSON(buildUrl(state.place, alt, null, true)),
+      ]);
+      const D = Engine.mergeData(mf.status === "fulfilled" ? mf.value : null, def.status === "fulfilled" ? def.value : null);
+      if (autoAlt && D.elevation != null) {
+        if (state.place.village == null) state.place.village = D.elevation;
+        setAlt(D.elevation);
+      }
+      state.data = D; state.fetchedAt = Date.now();
+      save();
+      render();
+      status(D.hasMF ? "" : "Modèle Météo-France indisponible, prévisions du modèle par défaut.");
+    } catch (e) {
+      status(state.data ? "Mise à jour impossible, affichage des dernières données." : "Impossible de joindre le service météo. Vérifie ta connexion.", true, true);
+    }
+  }
+
+  /* ---------- Rendu ---------- */
+  const NS = "http://www.w3.org/2000/svg";
+  function shroom(score) {
+    const lvl = Engine.level(score);
+    const h = 6 + score * 0.36, cw = 10 + score * 0.18, ch = 5 + score * 0.07;
+    const top = 50 - h;
+    return `<svg viewBox="0 0 40 54" aria-hidden="true">
+      <line class="ground" x1="2" y1="50.5" x2="38" y2="50.5"/>
+      <rect class="stem" x="${20 - 3.2}" y="${top + ch * 0.4}" width="6.4" height="${Math.max(0, 50 - top - ch * 0.4)}" rx="2.5"/>
+      <path class="f-${lvl}" d="M ${20 - cw / 2} ${top + ch} a ${cw / 2} ${ch} 0 0 1 ${cw} 0 Z"/>
+    </svg>`;
+  }
+  const pct = x => `${Math.round(x * 100)}%`;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function explain(r, sp, D, today) {
+    const items = [];
+    const wl = r.W >= 0.7 ? "bonne" : r.W >= 0.4 ? "correcte" : "insuffisante";
+    items.push(["Réserve en eau", r.W, `Réserve ${wl} : environ ${Math.max(0, Math.round(r.m))} mm de pluie utile sur trois semaines${r.smPct != null ? `, sol humide à ${r.smPct} %` : ""}.`]);
+    items.push(["Température du sol", r.T, r.st != null
+      ? `Sol à ${Math.round(r.st)} °C${r.stEst ? " (estimé d'après l'air)" : ""}, idéal entre ${sp.soil[0]} et ${sp.soil[1]} °C.`
+      : "Température du sol indisponible."]);
+    let trig;
+    if (r.ep) {
+      const fut = r.ep.end > today;
+      const when = fut ? `prévue jusqu'au ${fmtDM(D.time[r.ep.end])}` : `terminée le ${fmtDM(D.time[r.ep.end])}`;
+      trig = `Pluie de ${Math.round(r.ep.mm)} mm ${r.ep.days > 1 ? `sur ${r.ep.days} jours ` : ""}${when}${fut && r.ep.prob != null ? ` (probabilité ${r.ep.prob} %)` : ""}, soit ${r.ep.lag} j avant ce jour. Idéal : ${sp.lag[0]} à ${sp.lag[1]} j.`;
+    } else trig = `Aucun épisode d'au moins 15 mm à la bonne distance. Il en faut un ${sp.lag[0]} à ${sp.lag[1]} jours avant.`;
+    if (r.shock) trig += ` Rafraîchissement de ${Math.round(r.shock)} °C, souvent déclencheur.`;
+    items.push(["Déclencheur", r.Tr, trig]);
+    items.push(["Saison", r.S, r.S >= 0.9 ? "En pleine saison." : r.S >= 0.4 ? "Début ou fin de saison." : r.S > 0 ? "En marge de saison, pousses rares." : "Hors saison."]);
+    const warns = [];
+    if (r.frostF < 1) warns.push(`Gel ou froid marqué (${Math.round(r.tminR)} °C) : pousse freinée.`);
+    if (r.heatF < 1) warns.push(`Fortes chaleurs (${Math.round(r.tmaxR)} °C) : le sol sèche vite.`);
+    if (r.W < 0.25) warns.push("Sol trop sec : l'indice est plafonné tant qu'il ne pleut pas.");
+    return `<ul class="why">${items.map(([k, v, t]) => `<li><span class="k">${k}<span class="meter"><i style="width:${pct(v)}"></i></span></span><span class="t">${t}</span></li>`).join("")}${warns.map(w => `<li><span class="warn">${w}</span></li>`).join("")}</ul>`;
+  }
+
+  function renderPlate(res, D, today) {
+    const { sp, days, best } = res;
+    const sel = state.selected[sp.id] != null ? state.selected[sp.id] : best.d;
+    const r = days.find(x => x.d === sel) || best;
+    const lvl = Engine.level(r.score);
+    const far = r.d - today;
+    const el = document.createElement("article");
+    el.className = "plate";
+    el.innerHTML = `
+      <div class="plate-head">
+        <div><h2>${sp.name}</h2><p class="latin">${sp.latin}</p></div>
+        <div class="score-big lvl-${lvl}"><b>${r.score}</b><span>${Engine.LEVEL_TXT[lvl]}</span></div>
+      </div>
+      <div class="days" role="group" aria-label="Indice jour par jour">
+        ${days.map(x => `<button type="button" class="day${x.d - today >= 4 ? " far" : ""}" data-d="${x.d}" aria-pressed="${x.d === r.d}" aria-label="${fmtLong(D.time[x.d])} : indice ${x.score} sur 100">
+          ${shroom(x.score)}<span class="d">${x.d === today ? "auj." : fmtShort(D.time[x.d])}</span><span class="n">${x.score}</span></button>`).join("")}
+      </div>
+      <details${state.open && state.open[sp.id] ? " open" : ""}>
+        <summary>Pourquoi ${r.score} le ${r.d === today ? "jour même" : fmtLong(D.time[r.d])}</summary>
+        ${explain(r, sp, D, today)}
+        ${far >= 4 ? `<p class="conf">Prévision à ${far} jours : fiabilité limitée.</p>` : far >= 2 ? `<p class="conf">Prévision à ${far} jours : fiabilité moyenne.</p>` : ""}
+      </details>`;
+    el.querySelectorAll(".day").forEach(b => b.addEventListener("click", () => {
+      state.selected[sp.id] = +b.dataset.d;
+      const det = el.querySelector("details");
+      state.open = state.open || {}; state.open[sp.id] = det.open;
+      const fresh = renderPlate(res, D, today);
+      fresh.style.animation = "none";
+      el.replaceWith(fresh);
+      fresh.querySelector(`.day[data-d="${b.dataset.d}"]`).focus();
+    }));
+    el.querySelector("details").addEventListener("toggle", e => { state.open = state.open || {}; state.open[sp.id] = e.target.open; });
+    return el;
+  }
+
+  function renderBest(out, D, today) {
+    let top = null;
+    for (const s of out.species) for (const d of s.days) if (!top || d.score > top.r.score) top = { s, r: d };
+    const box = $("#best");
+    if (!top || top.r.score < 25) {
+      box.innerHTML = `<p>Pas de pousse marquée attendue cette semaine.</p><p class="sub">Il manque de l'eau ou la saison n'y est pas. Un épisode de plus de 15 mm relancerait les choses une dizaine de jours plus tard.</p>`;
+      return;
+    }
+    const when = top.r.d === today ? "dès aujourd'hui" : fmtLong(D.time[top.r.d]);
+    box.innerHTML = `<p>Meilleure chance : ${esc(top.s.sp.name.toLowerCase())}, ${when}.</p><p class="sub">Indice ${top.r.score} sur 100, ${Engine.LEVEL_TXT[Engine.level(top.r.score)].toLowerCase()}, à ${state.alt} m d'altitude.</p>`;
+  }
+
+  function renderWeather(D, today) {
+    const n = D.time.length, W = 320, H = 110, top = 14, base = 86;
+    const maxR = Math.max(20, ...D.rain.map(x => x || 0));
+    const tVals = D.tmean.filter(x => x != null);
+    const tLo = Math.min(0, ...tVals), tHi = Math.max(25, ...tVals);
+    const bw = W / n;
+    const bars = D.rain.map((v, i) => {
+      const h = ((v || 0) / maxR) * (base - top);
+      return `<rect class="wx-bar${i > today ? " fc" : ""}" x="${(i * bw + 1).toFixed(1)}" y="${(base - h).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${h.toFixed(1)}" rx="1"/>`;
+    }).join("");
+    const pts = D.tmean.map((v, i) => v == null ? null : `${(i * bw + bw / 2).toFixed(1)},${(base - ((v - tLo) / (tHi - tLo)) * (base - top)).toFixed(1)}`).filter(Boolean).join(" ");
+    const tx = (today * bw + bw / 2).toFixed(1);
+    const sum = (a, b) => D.rain.slice(a, b).reduce((s, x) => s + (x || 0), 0);
+    const r21 = sum(Math.max(0, today - 21), today), r7 = sum(Math.max(0, today - 7), today), f7 = sum(today, Math.min(n, today + 7));
+    const minRecent = Engine.avg(D.tmin.slice(Math.max(0, today - 3), today));
+    $("#wx").innerHTML = `
+      <svg class="wx-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Pluie quotidienne et température moyenne sur ${n} jours">
+        ${bars}
+        <polyline class="wx-line" points="${pts}"/>
+        <line class="wx-today" x1="${tx}" y1="4" x2="${tx}" y2="${base + 2}"/>
+        <text class="wx-txt" x="0" y="${H - 8}">${fmtDM(D.time[0])}</text>
+        <text class="wx-txt" x="${tx}" y="${H - 8}" text-anchor="middle">aujourd'hui</text>
+        <text class="wx-txt" x="${W}" y="${H - 8}" text-anchor="end">${fmtDM(D.time[n - 1])}</text>
+        <text class="wx-txt" x="0" y="9">${Math.round(maxR)} mm</text>
+      </svg>
+      <div class="legend"><span style="--c:var(--rain)">Pluie mesurée</span><span class="lg-fc" style="--c:var(--rain)">Pluie prévue</span><span style="--c:var(--cep)">Température moyenne</span></div>
+      <ul class="totals">
+        <li><span>Pluie sur 21 jours</span><b>${Math.round(r21)} mm</b></li>
+        <li><span>Pluie sur 7 jours</span><b>${Math.round(r7)} mm</b></li>
+        <li><span>Pluie prévue sur 7 jours</span><b>${Math.round(f7)} mm</b></li>
+        <li><span>Minimales des 3 dernières nuits</span><b>${minRecent != null ? Math.round(minRecent) + " °C" : "–"}</b></li>
+      </ul>`;
+  }
+
+  function render() {
+    const D = state.data; if (!D) return;
+    const out = Engine.compute(D);
+    const today = out.today;
+    renderBest(out, D, today);
+    const plates = $("#plates"); plates.innerHTML = "";
+    // Espèces triées par meilleur indice de la semaine
+    [...out.species].sort((a, b) => b.best.score - a.best.score).forEach(res => plates.appendChild(renderPlate(res, D, today)));
+    renderWeather(D, today);
+    $("#results").hidden = false;
+    const t = new Date(state.fetchedAt);
+    $("#updated").textContent = `Mis à jour le ${t.toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} à ${t.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}${state.place ? `, ${state.place.name}` : ""}.`;
+  }
+
+  /* ---------- Démarrage ---------- */
+  const saved = load();
+  if (saved && saved.place) {
+    state.place = saved.place; state.data = saved.data; state.fetchedAt = saved.fetchedAt;
+    q.value = saved.place.name + (saved.place.admin ? `, ${saved.place.admin}` : "");
+    setAlt(saved.alt != null ? saved.alt : 800);
+    if (state.data) render();
+    if (!state.fetchedAt || Date.now() - state.fetchedAt > 60 * 60 * 1000) fetchWeather();
+  } else {
+    state.place = { ...DEFAULT_PLACE };
+    q.value = `${DEFAULT_PLACE.name}, ${DEFAULT_PLACE.admin}`;
+    fetchWeather(true);
+  }
+})();
+</script>
+</body>
+</html>
