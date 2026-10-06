@@ -61,6 +61,14 @@ button{font:inherit; color:inherit; cursor:pointer}
 .alt output{font-family:var(--serif); font-size:1.25rem; font-weight:500}
 input[type=range]{width:100%; accent-color:var(--cep); margin:4px 0 2px; height:28px}
 .hint{margin:0; font-size:.85rem; color:var(--muted)}
+.spot{margin-top:16px; border-top:1px solid var(--line); padding-top:4px}
+.spot summary{color:var(--ink); font-weight:600; font-size:.95rem}
+.spot-sum{font-weight:400; color:var(--muted)}
+.spot .hint{margin:4px 0 10px}
+#map{height:280px; border-radius:10px; border:1.5px solid var(--line); background:var(--surface); z-index:0}
+.spot-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:12px 0 8px}
+select{width:100%; font:inherit; color:var(--ink); background:var(--surface); border:1.5px solid var(--line); border-radius:10px; padding:9px 8px}
+select:focus{outline:none; border-color:var(--cep)}
 #status{margin:16px 0 0; font-size:.9rem; color:var(--muted)}
 #status:empty{display:none}
 #status.err{color:var(--cep); font-weight:500}
@@ -151,6 +159,16 @@ footer strong{color:var(--ink); font-weight:600}
       <input id="alt" type="range" min="0" max="2400" step="50" value="800">
       <p class="hint" id="altHint">Règle l'altitude de la forêt où tu cherches, pas celle du village.</p>
     </div>
+    <details class="spot" id="spotBox">
+      <summary>Mon coin <span id="spotSum" class="spot-sum"></span></summary>
+      <p class="hint">Touche la carte à l'endroit où tu cherches : altitude, exposition et essence dominante sont lues sur les données de l'IGN. Tu peux les corriger.</p>
+      <div id="map" aria-label="Carte pour placer ton coin"></div>
+      <div class="spot-grid">
+        <div><label for="host">Forêt</label><select id="host"></select></div>
+        <div><label for="aspect">Versant</label><select id="aspect"></select></div>
+      </div>
+      <p class="hint" id="spotInfo"></p>
+    </details>
   </section>
 
   <p id="status" role="status" aria-live="polite"></p>
@@ -166,7 +184,7 @@ footer strong{color:var(--ink); font-weight:600}
 
   <footer>
     <p id="updated"></p>
-    <p>Données Open-Meteo, modèles Météo-France AROME et ARPEGE corrigés à l'altitude choisie. Indice indicatif construit sur des repères de cueilleurs : il donne une tendance, pas une garantie.</p>
+    <p>Données Open-Meteo, modèles Météo-France AROME et ARPEGE corrigés à l'altitude choisie. Forêts : BD Forêt de l'IGN ; relief : RGE ALTI de l'IGN. Indice indicatif construit sur des repères de cueilleurs : il donne une tendance, pas une garantie.</p>
     <p><strong>Ne mange jamais un champignon sans identification certaine.</strong> En cas de doute, fais-le vérifier par un pharmacien ou une société mycologique.</p>
   </footer>
 </main>
@@ -178,33 +196,74 @@ const Engine = (() => {
   const avg = arr => { const v = arr.filter(x => x != null && !isNaN(x)); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
 
   /* Profils de départ : repères empiriques de cueilleurs, ajustables.
-     season : poids par mois (1 = janvier) ; soil : plage idéale de température du sol à 6 cm (°C) ;
-     lag : délai idéal (jours) après la fin d'un épisode pluvieux ;
+     season : poids par mois (1 = janvier) ; soil : plage idéale de température du sol forestier (°C) ;
+     lag : délai idéal (jours) après la fin d'un épisode pluvieux, quand le sol est au milieu de sa plage idéale
+     (plus court s'il fait plus chaud, plus long s'il fait plus froid) ;
      wet : remplissage de la réserve du sol (0 à 1) à partir duquel l'eau n'est plus limitante ;
+     altMax : altitude au-dessus de laquelle l'espèce se raréfie, à 46,5° N (remontée vers le sud) ;
+     hosts : affinité (0 à 1) avec l'essence dominante de la parcelle ;
      heatMax : maximale au-delà de laquelle le sol sèche trop ; frost : minimale sous laquelle la pousse est freinée ;
-     shock : un rafraîchissement net joue le rôle de déclencheur. */
+     shock : un rafraîchissement net amplifie le déclenchement. */
   const SPECIES = [
     { id: "cepes_ete", name: "Cèpes d'été et têtes de nègre", latin: "Boletus aestivalis, B. aereus",
-      season: {5:.3, 6:.8, 7:1, 8:1, 9:.8, 10:.3}, soil: [15, 21], lag: [7, 12], wet: .55, heatMax: 33, frost: 3, shock: false },
+      season: {5:.3, 6:.8, 7:1, 8:1, 9:.8, 10:.3}, soil: [15, 21], lag: [7, 12], wet: .55, altMax: 1100,
+      hosts: { chene: 1, chataignier: 1, hetre: .9, feuillus: .9, mixte: .8, pin: .4, sapin: .3, coniferes: .3, douglas: .2, meleze: .2, peuplier: .1, robinier: .1, aucune: .1 },
+      heatMax: 33, frost: 3, shock: false },
     { id: "cepes_aut", name: "Cèpes d'automne et cèpes des pins", latin: "Boletus edulis, B. pinophilus",
-      season: {8:.4, 9:1, 10:1, 11:.7, 12:.15}, soil: [9, 15], lag: [9, 15], wet: .6, heatMax: 28, frost: -1, shock: true },
+      season: {8:.4, 9:1, 10:1, 11:.7, 12:.15}, soil: [9, 15], lag: [9, 15], wet: .6, altMax: 1700,
+      hosts: { chene: .9, chataignier: .9, hetre: 1, feuillus: .8, mixte: 1, pin: .9, sapin: 1, coniferes: .9, douglas: .4, meleze: .4, peuplier: .1, robinier: .1, aucune: .1 },
+      heatMax: 28, frost: -1, shock: true },
     { id: "girolles", name: "Girolles", latin: "Cantharellus cibarius",
-      season: {5:.3, 6:.8, 7:1, 8:1, 9:1, 10:.8, 11:.4}, soil: [11, 19], lag: [6, 10], wet: .7, heatMax: 30, frost: 0, shock: false },
+      season: {5:.3, 6:.8, 7:1, 8:1, 9:1, 10:.8, 11:.4}, soil: [11, 19], lag: [6, 10], wet: .7, altMax: 1500,
+      hosts: { chene: 1, chataignier: 1, hetre: 1, feuillus: .9, mixte: 1, pin: .7, sapin: .9, coniferes: .8, douglas: .5, meleze: .4, peuplier: .1, robinier: .1, aucune: .1 },
+      heatMax: 30, frost: 0, shock: false },
     { id: "pieds", name: "Pieds de mouton", latin: "Hydnum repandum",
-      season: {9:.6, 10:1, 11:1, 12:.6, 1:.2}, soil: [6, 13], lag: [10, 16], wet: .6, heatMax: 26, frost: -3, shock: false },
+      season: {9:.6, 10:1, 11:1, 12:.6, 1:.2}, soil: [6, 13], lag: [10, 16], wet: .6, altMax: 1400,
+      hosts: { chene: .9, chataignier: .8, hetre: 1, feuillus: .9, mixte: 1, pin: .7, sapin: 1, coniferes: .9, douglas: .5, meleze: .5, peuplier: .1, robinier: .1, aucune: .1 },
+      heatMax: 26, frost: -3, shock: false },
   ];
+
+  /* Libellés des essences pour l'interface. */
+  const HOSTS = {
+    chene: "Chênes", chataignier: "Châtaignier", hetre: "Hêtre", feuillus: "Feuillus mélangés",
+    pin: "Pins", sapin: "Sapin, épicéa", douglas: "Douglas", meleze: "Mélèze", coniferes: "Conifères mélangés",
+    mixte: "Feuillus et conifères", peuplier: "Peupliers", robinier: "Robinier", aucune: "Pas de forêt (lande, coupe, prairie)",
+  };
+  const forestOf = host => !host ? "mixte" : host === "aucune" ? "aucune" : host === "mixte" ? "mixte"
+    : ["pin", "sapin", "douglas", "meleze", "coniferes"].includes(host) ? "resineux" : "feuillus";
 
   const RAIN_DAY = 2;       // un jour compte comme pluvieux à partir de 2 mm
   const EPISODE_WET = 15;   // pluie d'un épisode suffisante sur sol déjà humide (mm)
   const EPISODE_DRY = 40;   // pluie nécessaire après une sécheresse (mm)
   const SOIL_CAP = 60;      // réserve utile de la couche explorée par le mycélium (mm)
+  const DD_BASE = 4;        // en dessous de 4 °C de sol, le mycélium ne progresse presque plus
 
-  /* Forêt mixte par défaut. cap : pluie retenue par le feuillage chaque jour (mm), puis frac de l'excédent ;
-     kc : part de l'évapotranspiration de référence réellement perdue par le sol forestier. */
-  const FOREST = { capOn: 1.5, capOff: 0.6, frac: 0.08, kcOn: 0.7, kcOff: 0.45 };
+  /* Couvert selon le type de forêt. cap : pluie retenue par le feuillage chaque jour (mm), puis frac de l'excédent ;
+     kc : part de l'évapotranspiration de référence réellement perdue par le sol ; shade : rafraîchissement estival du sol. */
+  const FORESTS = {
+    feuillus: { capOn: 1.3, capOff: 0.4, frac: .07, kcOn: .70, kcOff: .40, shade: 1 },
+    resineux: { capOn: 2.0, capOff: 2.0, frac: .12, kcOn: .65, kcOff: .55, shade: 1.2 },
+    mixte:    { capOn: 1.6, capOff: 1.1, frac: .09, kcOn: .68, kcOff: .48, shade: 1.1 },
+    aucune:   { capOn: 0,   capOff: 0,   frac: 0,   kcOn: .80, kcOff: .50, shade: 0 },
+  };
   const leafOn = month => month >= 4 && month <= 10;
+  const monthOf = t => +t.slice(5, 7);
 
-  /* Fusionne la réponse Météo-France (a) et la réponse par défaut (b, qui porte les données de sol). */
+  /* Lit une parcelle de la BD Forêt (IGN) et en déduit l'essence dominante. */
+  function classifyForest(p) {
+    const n = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const e = n(p.essence), t = n(p.tfv) + " " + n(p.tfv_g11);
+    if (/lande|herbac|sans couvert/.test(t)) return "aucune";
+    return /chene/.test(e) ? "chene" : /chataign/.test(e) ? "chataignier" : /hetre/.test(e) ? "hetre"
+      : /peupl/.test(e) ? "peuplier" : /robinier/.test(e) ? "robinier" : /douglas/.test(e) ? "douglas"
+      : /meleze/.test(e) ? "meleze" : /sapin|epicea/.test(e) ? "sapin" : /\bpin/.test(e) ? "pin"
+      : /mixte/.test(t) ? "mixte" : /conifere/.test(t) ? "coniferes" : "feuillus";
+  }
+
+  /* Ensoleillement du versant, de -1 (pente raide au nord) à +1 (pente raide au sud). */
+  const southness = spot => spot.aspect == null || !spot.slope ? 0 : Math.cos((spot.aspect - 180) * Math.PI / 180) * Math.sin(Math.min(spot.slope, 45) * Math.PI / 180);
+
+  /* Fusionne la réponse Météo-France (a) et la réponse par défaut (b, qui porte l'humidité du sol). */
   function mergeData(a, b) {
     const okA = a && a.daily && a.daily.time, okB = b && b.daily && b.daily.time;
     if (!okA && !okB) throw new Error("Aucune donnée météo reçue.");
@@ -229,25 +288,32 @@ const Engine = (() => {
       rain: pick("precipitation_sum"),
       prob: pick("precipitation_probability_max"),
       et0: pick("et0_fao_evapotranspiration"),
-      soilT: hourlyMean("soil_temperature_6cm"),
       soilM: hourlyMean("soil_moisture_3_to_9cm"),
       elevation: okB && b.elevation != null ? b.elevation : (okA ? a.elevation : null),
       hasMF: !!okA,
     };
   }
 
-  const monthOf = t => +t.slice(5, 7);
+  /* Température du sol forestier, estimée d'après l'air (déjà corrigé à l'altitude choisie) :
+     le sol suit l'air avec retard, le couvert le rafraîchit l'été, un versant sud le réchauffe. */
+  function forestSoilTemp(D, F, south) {
+    return D.time.map((_, d) => {
+      const t7 = avg(D.tmean.slice(Math.max(0, d - 6), d + 1)), t21 = avg(D.tmean.slice(Math.max(0, d - 20), d + 1));
+      if (t7 == null) return null;
+      return 0.7 * t7 + 0.3 * t21 - F.shade * 0.15 * Math.max(0, t7 - 10) + 4 * south;
+    });
+  }
 
   /* Réservoir du sol forestier, jour par jour : la pluie qui traverse le feuillage le remplit
      jusqu'à SOIL_CAP (l'excédent ruisselle ou s'infiltre plus bas), l'évapotranspiration le vide
-     de moins en moins vite à mesure qu'il s'assèche. */
-  function waterBalance(D) {
+     de moins en moins vite à mesure qu'il s'assèche. Un versant sud sèche plus vite. */
+  function waterBalance(D, F, south) {
     const store = []; let s = SOIL_CAP * 0.5;
     D.time.forEach((t, i) => {
-      const on = leafOn(monthOf(t)), r = D.rain[i] || 0, cap = on ? FOREST.capOn : FOREST.capOff;
-      const net = r - Math.min(r, cap) - FOREST.frac * Math.max(0, r - cap);
+      const on = leafOn(monthOf(t)), r = D.rain[i] || 0, cap = on ? F.capOn : F.capOff;
+      const net = r - Math.min(r, cap) - F.frac * Math.max(0, r - cap);
       s = Math.min(SOIL_CAP, s + net);
-      const et = (on ? FOREST.kcOn : FOREST.kcOff) * (D.et0[i] != null ? D.et0[i] : 1.5);
+      const et = (on ? F.kcOn : F.kcOff) * (1 + 0.6 * south) * (D.et0[i] != null ? D.et0[i] : 1.5);
       s = Math.max(0, s - et * clamp(s / (0.5 * SOIL_CAP)));
       store.push(s);
     });
@@ -293,28 +359,42 @@ const Engine = (() => {
 
   const trap = (x, lo, hi, ramp) => x >= lo && x <= hi ? 1 : x < lo ? clamp(1 - (lo - x) / ramp) : clamp(1 - (x - hi) / ramp);
 
-  function scoreDay(D, d, sp, eps, store, smRel) {
+  /* Horloge thermique : degrés-jours de sol cumulés au-dessus de DD_BASE. Au-delà des données,
+     on prolonge au rythme moyen des 7 derniers jours pour estimer les dates de pousse. */
+  function thermalClock(soilT) {
+    const cum = []; let c = 0;
+    soilT.forEach(t => { c += t == null ? 0 : Math.max(0, t - DD_BASE); cum.push(c); });
+    const lastRate = Math.max(0.5, avg(soilT.slice(-7).map(t => t == null ? null : Math.max(0, t - DD_BASE))) || 0.5);
+    const at = i => i < cum.length ? cum[i] : cum[cum.length - 1] + (i - cum.length + 1) * lastRate;
+    const reach = (from, need) => { let i = from; while (at(i) - cum[from] < need && i - from < 120) i++; return i; };
+    return { cum, reach };
+  }
+
+  function scoreDay(D, d, sp, ctx) {
+    const { eps, store, smRel, soilT, clock, spot } = ctx;
+
     // 1. Eau : remplissage du réservoir, complété par la tendance d'humidité du modèle.
     const fill = store[d] / SOIL_CAP;
     let W = clamp((fill - 0.15) / (sp.wet - 0.15));
     if (smRel[d] != null) W = 0.75 * W + 0.25 * smRel[d];
-    const smPct = D.soilM[d] != null ? Math.round(D.soilM[d] * 100) : null;
 
-    // 2. Température du sol (estimée d'après l'air si le sol manque).
-    let st = D.soilT[d], stEst = false;
-    if (st == null) { st = avg(D.tmean.slice(Math.max(0, d - 4), d + 1)); stEst = true; }
+    // 2. Température du sol forestier.
+    const st = soilT[d];
     const T = st == null ? 0.5 : trap(st, sp.soil[0], sp.soil[1], 4);
 
-    // 3. Déclencheur : délai depuis le dernier épisode pluvieux, plus le choc thermique.
+    // 3. Déclencheur : chaleur accumulée depuis le dernier épisode pluvieux, en degrés-jours.
+    //    Le délai idéal en jours vaut pour un sol au milieu de la plage de l'espèce.
+    const rate = Math.max(1, (sp.soil[0] + sp.soil[1]) / 2 - DD_BASE);
+    const [a, b] = sp.lag.map(x => x * rate), up = 4 * rate, down = 6 * rate;
+    const win = e => [clock.reach(e.end, a), clock.reach(e.end, b)].map(i => i - e.end);
     let Tr = 0, ep = null, recent = null;
-    const [a, b] = sp.lag;
     for (const e of eps) {
       if (e.end > d) continue;
-      const lag = d - e.end;
-      if (lag < a - 4) recent = e;   // pluie trop récente pour avoir déjà fait sortir quelque chose
-      let s = lag < a - 4 ? 0 : lag < a ? (lag - (a - 4)) / 4 : lag <= b ? 1 : lag <= b + 6 ? 1 - (lag - b) / 6 : 0;
+      const dd = clock.cum[d] - clock.cum[e.end];
+      if (dd < a - up) { recent = { ...e, win: win(e) }; continue; }   // pluie trop récente pour avoir déjà fait sortir quelque chose
+      let s = dd < a ? (dd - (a - up)) / up : dd <= b ? 1 : dd <= b + down ? 1 - (dd - b) / down : 0;
       s *= clamp(e.mm / (e.thr + 10), 0.6, 1) * e.conf;
-      if (s > Tr) { Tr = s; ep = { ...e, lag }; }
+      if (s > Tr) { Tr = s; ep = { ...e, lag: d - e.end, win: win(e) }; }
     }
     // Le rafraîchissement amplifie un déclenchement par la pluie déjà en cours, il ne le remplace pas.
     let shock = null;
@@ -324,21 +404,28 @@ const Engine = (() => {
     }
 
     // 4. Saison.
-    const S = sp.season[+D.time[d].slice(5, 7)] || 0;
+    const S = sp.season[monthOf(D.time[d])] || 0;
 
-    // 5. Pénalités : gel et forte chaleur sur les 4 derniers jours.
-    const win = arr => arr.slice(Math.max(0, d - 3), d + 1).filter(x => x != null);
-    const mins = win(D.tmin), maxs = win(D.tmax);
+    // 5. Lieu : altitude (la limite haute remonte d'environ 100 m par degré vers le sud) et essence.
+    //    Le « trop bas » n'a pas de limite fixe : il passe par la chaleur et la sécheresse, déjà calculées.
+    const altTop = spot.alt == null ? null : sp.altMax + clamp((46.5 - (spot.lat ?? 46.5)) * 100, -300, 500);
+    const A = altTop == null ? 1 : Math.max(0.1, trap(spot.alt, -Infinity, altTop, 400));
+    const H = spot.host ? (sp.hosts[spot.host] ?? 1) : 1;
+
+    // 6. Pénalités : gel et forte chaleur sur les 4 derniers jours.
+    const win4 = arr => arr.slice(Math.max(0, d - 3), d + 1).filter(x => x != null);
+    const mins = win4(D.tmin), maxs = win4(D.tmax);
     const tminR = mins.length ? Math.min(...mins) : null, tmaxR = maxs.length ? Math.max(...maxs) : null;
     const frostF = tminR != null && tminR < sp.frost ? clamp(1 - (sp.frost - tminR) / 3 * 0.8, 0.2, 1) : 1;
     const heatF = tmaxR != null && tmaxR > sp.heatMax ? clamp(1 - (tmaxR - sp.heatMax) / 5 * 0.4, 0.6, 1) : 1;
 
-    // Les facteurs se multiplient : le plus faible limite la pousse (eau, sol, déclencheur).
+    // Les facteurs se multiplient : le plus faible limite la pousse (eau, sol, déclencheur, lieu).
     // Le plancher à 0,05 garde un indice résiduel ; les exposants règlent la sévérité de chacun.
     const f = x => Math.max(0.05, x);
-    let score = 100 * f(W) ** 0.5 * f(T) ** 0.4 * f(Tr) ** 0.6 * (0.25 + 0.75 * S) * frostF * heatF;
+    let score = 100 * f(W) ** 0.5 * f(T) ** 0.4 * f(Tr) ** 0.6 * (0.25 + 0.75 * S) * A * H * frostF * heatF;
     if (S === 0) score = Math.min(score, 10);            // hors saison
-    return { d, score: Math.round(score), W, T, Tr, S, store: store[d], fill, thrNow: threshold(fill), recent, smPct, st, stEst, ep, shock, tminR, tmaxR, frostF, heatF };
+    return { d, score: Math.round(score), W, T, Tr, S, A, altTop, H, store: store[d], fill, thrNow: threshold(fill), recent,
+      smPct: D.soilM[d] != null ? Math.round(D.soilM[d] * 100) : null, st, ep, shock, tminR, tmaxR, frostF, heatF };
   }
 
   function todayIndex(time, now = new Date()) {
@@ -348,24 +435,27 @@ const Engine = (() => {
     return i >= 0 ? i : Math.max(0, time.length - 8);
   }
 
-  function compute(D, now) {
+  /* spot : { lat, alt, host, aspect (degrés, 0 = nord), slope (degrés) }, tout est facultatif.
+     Le couvert (interception, ombrage) se déduit de l'essence ; sans essence connue, forêt mixte. */
+  function compute(D, spot = {}, now) {
     const today = todayIndex(D.time, now);
-    const store = waterBalance(D), smRel = soilRelative(D);
-    const eps = findEpisodes(D, store, today);
+    const F = FORESTS[forestOf(spot.host)], south = southness(spot);
+    const store = waterBalance(D, F, south), soilT = forestSoilTemp(D, F, south);
+    const ctx = { store, soilT, spot, smRel: soilRelative(D), clock: thermalClock(soilT), eps: findEpisodes(D, store, today) };
     const last = Math.min(D.time.length - 1, today + 6);
     const species = SPECIES.map(sp => {
       const days = [];
-      for (let d = today; d <= last; d++) days.push(scoreDay(D, d, sp, eps, store, smRel));
+      for (let d = today; d <= last; d++) days.push(scoreDay(D, d, sp, ctx));
       const best = days.reduce((x, y) => y.score > x.score ? y : x, days[0]);
       return { sp, days, best };
     });
-    return { today, eps, store, species };
+    return { today, eps: ctx.eps, store, soilT, south, species };
   }
 
   const level = s => s >= 65 ? 4 : s >= 45 ? 3 : s >= 25 ? 2 : 1;
   const LEVEL_TXT = { 4: "Très favorable", 3: "Favorable", 2: "Possible", 1: "Peu probable" };
 
-  return { SPECIES, SOIL_CAP, mergeData, waterBalance, threshold, findEpisodes, scoreDay, compute, todayIndex, level, LEVEL_TXT, avg };
+  return { SPECIES, HOSTS, FORESTS, SOIL_CAP, forestOf, classifyForest, southness, mergeData, waterBalance, forestSoilTemp, threshold, findEpisodes, scoreDay, compute, todayIndex, level, LEVEL_TXT, avg };
 })();
 if (typeof module !== "undefined") module.exports = Engine;
 </script>
@@ -379,10 +469,10 @@ if (typeof module !== "undefined") module.exports = Engine;
   const STORE = "pousse:v3";   // v3 : 60 jours d'historique pour le réservoir du sol
   const DEFAULT_PLACE = { name: "Montferrier", admin: "Ariège", lat: 42.8667, lon: 1.7833, village: null };
 
-  let state = { place: null, alt: null, data: null, fetchedAt: null, selected: {} };
+  let state = { place: null, spot: null, alt: null, data: null, fetchedAt: null, selected: {} };
 
   /* ---------- Stockage local (facultatif) ---------- */
-  const save = () => { try { localStorage.setItem(STORE, JSON.stringify({ place: state.place, alt: state.alt, data: state.data, fetchedAt: state.fetchedAt })); } catch (e) {} };
+  const save = () => { try { localStorage.setItem(STORE, JSON.stringify({ place: state.place, spot: state.spot, alt: state.alt, data: state.data, fetchedAt: state.fetchedAt })); } catch (e) {} };
   const load = () => { try { return JSON.parse(localStorage.getItem(STORE) || "null"); } catch (e) { return null; } };
 
   /* ---------- Dates ---------- */
@@ -412,12 +502,131 @@ if (typeof module !== "undefined") module.exports = Engine;
     altInput.value = state.alt;
     altOut.textContent = `${state.alt} m`;
     const v0 = state.place && state.place.village;
-    $("#altHint").textContent = v0 != null
+    $("#altHint").textContent = state.spot && state.spot.lat != null && !state.spot.manualOnly
+      ? "Altitude lue au point placé sur la carte. Tu peux l'ajuster."
+      : v0 != null
       ? `Village à ${Math.round(v0)} m. Règle l'altitude de la forêt où tu cherches.`
       : "Règle l'altitude de la forêt où tu cherches, pas celle du village.";
-    if (fromUser) { clearTimeout(setAlt.t); setAlt.t = setTimeout(fetchWeather, 500); }
+    if (fromUser) { clearTimeout(setAlt.t); setAlt.t = setTimeout(fetchWeather, 500); syncSpotUI(); }
   }
   altInput.addEventListener("input", () => setAlt(+altInput.value, true));
+
+  /* ---------- Mon coin : carte, relief et forêt ---------- */
+  const ALTI = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json";
+  const WFS = "https://data.geopf.fr/wfs/ows";
+  const ASPECTS = [["", "Plat ou inconnu"], ["0", "Nord"], ["45", "Nord-est"], ["90", "Est"], ["135", "Sud-est"], ["180", "Sud"], ["225", "Sud-ouest"], ["270", "Ouest"], ["315", "Nord-ouest"]];
+  const hostSel = $("#host"), aspSel = $("#aspect");
+  hostSel.innerHTML = `<option value="">Inconnue</option>` + Object.entries(Engine.HOSTS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+  aspSel.innerHTML = ASPECTS.map(([v, t]) => `<option value="${v}">${t}</option>`).join("");
+  const octant = a => Math.round(a / 45) % 8;
+  const aspectName = a => ASPECTS[1 + octant(a)][1].toLowerCase();
+  const loc = () => (state.spot && state.spot.lat != null ? state.spot : state.place);
+  const spotArg = () => ({ lat: loc().lat, alt: state.alt, host: state.spot?.host || null, aspect: state.spot?.aspect ?? null, slope: state.spot?.slope || 0 });
+  const sloped = s => s && s.aspect != null && s.slope >= 3;
+
+  function syncSpotUI() {
+    const s = state.spot;
+    hostSel.value = s?.host || "";
+    aspSel.value = sloped(s) ? String(octant(s.aspect) * 45) : "";
+    $("#spotSum").textContent = s
+      ? "· " + [s.host ? Engine.HOSTS[s.host] : null, sloped(s) ? `versant ${aspectName(s.aspect)}` : "terrain plat", `${state.alt} m`].filter(Boolean).join(", ")
+      : "· non placé, calcul pour la commune";
+    $("#spotInfo").textContent = s?.info || "";
+    placeMarker();
+  }
+  // Une correction à la main garde le point de la carte s'il y en a un, sinon elle s'applique à la commune.
+  const editSpot = patch => {
+    state.spot = { ...(state.spot || { lat: null, lon: null, manualOnly: true }), ...patch };
+    save(); syncSpotUI(); render();
+  };
+  hostSel.addEventListener("change", () => editSpot({ host: hostSel.value || null }));
+  aspSel.addEventListener("change", () => editSpot(aspSel.value === "" ? { aspect: null, slope: 0 } : { aspect: +aspSel.value, slope: Math.max(state.spot?.slope || 0, 15) }));
+
+  let map = null, marker = null;
+  const loadLeaflet = () => new Promise((ok, ko) => {
+    if (window.L) return ok();
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css";
+    document.head.appendChild(css);
+    const js = document.createElement("script");
+    js.src = "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"; js.onload = ok; js.onerror = ko;
+    document.head.appendChild(js);
+  });
+  const ign = (layer, fmt) => `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=normal&TILEMATRIXSET=PM&FORMAT=${fmt}&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`;
+  async function openMap() {
+    if (map) { map.invalidateSize(); return; }
+    try { await loadLeaflet(); } catch (e) { $("#spotInfo").textContent = "Carte indisponible pour l'instant. Tu peux régler forêt et versant à la main."; return; }
+    const attribution = '<a href="https://www.ign.fr/">IGN</a>';
+    const plan = L.tileLayer(ign("GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2", "image/png"), { maxZoom: 18, attribution });
+    const photo = L.tileLayer(ign("ORTHOIMAGERY.ORTHOPHOTOS", "image/jpeg"), { maxZoom: 18, attribution });
+    const p = loc();
+    map = L.map("map", { layers: [plan] }).setView([p.lat, p.lon], state.spot?.lat != null ? 15 : 13);
+    L.control.layers({ "Plan IGN": plan, "Photos aériennes": photo }).addTo(map);
+    map.on("click", e => setSpot(e.latlng.lat, e.latlng.lng));
+    placeMarker();
+  }
+  function placeMarker() {
+    if (!map) return;
+    if (marker) { marker.remove(); marker = null; }
+    if (state.spot?.lat != null) marker = L.circleMarker([state.spot.lat, state.spot.lon], { radius: 8, color: "#7B4A26", weight: 3, fillOpacity: .35 }).addTo(map);
+  }
+  $("#spotBox").addEventListener("toggle", e => { if (e.target.open) openMap(); });
+
+  /* Pente et orientation à partir de l'altitude du point et de quatre voisins à 40 m (RGE ALTI de l'IGN,
+     ou à défaut le relief à 90 m d'Open-Meteo). L'orientation est celle vers laquelle la pente descend. */
+  async function readRelief(lat, lon) {
+    const d = 40, dLat = d / 111320, dLon = d / (111320 * Math.cos(lat * Math.PI / 180));
+    const pts = [[lat, lon], [lat + dLat, lon], [lat - dLat, lon], [lat, lon + dLon], [lat, lon - dLon]];
+    let z;
+    try {
+      z = (await getJSON(`${ALTI}?lon=${pts.map(p => p[1].toFixed(6)).join("|")}&lat=${pts.map(p => p[0].toFixed(6)).join("|")}&resource=ign_rge_alti_wld&zonly=true`)).elevations;
+    } catch (e) {
+      z = (await getJSON(`https://api.open-meteo.com/v1/elevation?latitude=${pts.map(p => p[0].toFixed(5)).join(",")}&longitude=${pts.map(p => p[1].toFixed(5)).join(",")}`)).elevation;
+    }
+    if (!z || z.length < 5 || z.some(v => v == null || v < -100)) return null;   // -99999 : hors couverture
+    const gx = (z[3] - z[4]) / (2 * d), gy = (z[1] - z[2]) / (2 * d);
+    return { alt: z[0], slope: Math.atan(Math.hypot(gx, gy)) * 180 / Math.PI, aspect: (Math.atan2(-gx, -gy) * 180 / Math.PI + 360) % 360 };
+  }
+
+  const inRing = (x, y, ring) => {
+    let c = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+    }
+    return c;
+  };
+  const inPoly = (x, y, poly) => inRing(x, y, poly[0]) && !poly.slice(1).some(h => inRing(x, y, h));
+
+  /* Parcelle de la BD Forêt qui contient le point. Sans parcelle, le point n'est pas en forêt cartographiée. */
+  async function readForest(lat, lon) {
+    const e = 0.0005;
+    const params = new URLSearchParams({ SERVICE: "WFS", VERSION: "2.0.0", REQUEST: "GetFeature", TYPENAMES: "LANDCOVER.FORESTINVENTORY.V2:formation_vegetale",
+      OUTPUTFORMAT: "application/json", SRSNAME: "CRS:84", COUNT: 20, BBOX: `${lon - e},${lat - e},${lon + e},${lat + e},CRS:84` });
+    const j = await getJSON(`${WFS}?${params}`);
+    const f = (j.features || []).find(f => {
+      const g = f.geometry; if (!g) return false;
+      return (g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : []).some(p => inPoly(lon, lat, p));
+    });
+    return f ? { host: Engine.classifyForest(f.properties), label: f.properties.tfv } : { host: "aucune", label: null };
+  }
+
+  async function setSpot(lat, lon) {
+    status("Lecture du relief et de la forêt…");
+    const [relief, forest] = await Promise.allSettled([readRelief(lat, lon), readForest(lat, lon)]);
+    const r = relief.status === "fulfilled" ? relief.value : null, f = forest.status === "fulfilled" ? forest.value : null;
+    const info = [
+      !f ? "Type de forêt introuvable, à régler à la main."
+        : f.label ? `BD Forêt : ${f.label.trim().replace(/^./, c => c.toLowerCase())}.`
+        : "Pas de forêt cartographiée ici (lande, prairie, coupe, ou bois de moins d'un demi-hectare).",
+      !r ? "Relief introuvable." : r.slope >= 3 ? `Pente de ${Math.round(r.slope)}°, versant ${aspectName(r.aspect)}.` : "Terrain presque plat.",
+    ];
+    state.spot = { lat: +lat.toFixed(5), lon: +lon.toFixed(5), host: f ? f.host : null, aspect: r ? r.aspect : null, slope: r ? r.slope : 0, info: info.join(" ") };
+    state.selected = {};
+    if (r) setAlt(r.alt);
+    syncSpotUI();
+    fetchWeather(!r);   // sans relief, Open-Meteo donne l'altitude du point
+  }
 
   /* ---------- Recherche de commune ---------- */
   const q = $("#q"), sugg = $("#sugg");
@@ -471,7 +680,9 @@ if (typeof module !== "undefined") module.exports = Engine;
     state.place = { name: r.name, admin: r.admin2 || r.admin1 || "", lat: r.latitude, lon: r.longitude, village: r.elevation != null ? r.elevation : null };
     q.value = r.name + (state.place.admin ? `, ${state.place.admin}` : "");
     closeSugg(); q.blur();
-    state.selected = {};
+    state.selected = {}; state.spot = null;
+    syncSpotUI();
+    if (map) map.setView([state.place.lat, state.place.lon], 13);
     setAlt(state.place.village != null ? state.place.village : 800);
     fetchWeather(state.place.village == null);
   }
@@ -481,10 +692,12 @@ if (typeof module !== "undefined") module.exports = Engine;
     if (!navigator.geolocation) { status("Ce navigateur ne permet pas la géolocalisation.", true); return; }
     status("Recherche de ta position…");
     navigator.geolocation.getCurrentPosition(pos => {
-      state.place = { name: "Ma position", admin: "", lat: +pos.coords.latitude.toFixed(4), lon: +pos.coords.longitude.toFixed(4), village: null };
+      // Sur place en forêt : la position sert directement de coin (relief et essence lus sur l'IGN).
+      const lat = pos.coords.latitude, lon = pos.coords.longitude;
+      state.place = { name: "Ma position", admin: "", lat: +lat.toFixed(4), lon: +lon.toFixed(4), village: null };
       q.value = "Ma position";
-      state.selected = {};
-      fetchWeather(true);
+      if (map) map.setView([lat, lon], 15);
+      setSpot(lat, lon);
     }, err => {
       status(err.code === 1 ? "Position refusée. Autorise la localisation ou tape une commune." : "Position introuvable. Tape une commune.", true);
     }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 300000 });
@@ -496,7 +709,7 @@ if (typeof module !== "undefined") module.exports = Engine;
     const params = new URLSearchParams({ latitude: p.lat, longitude: p.lon, daily, past_days: 60, forecast_days: 8, timezone: "Europe/Paris" });
     if (alt != null) params.set("elevation", alt);
     if (model) params.set("models", model);
-    if (withSoil) params.set("hourly", "soil_temperature_6cm,soil_moisture_3_to_9cm");
+    if (withSoil) params.set("hourly", "soil_moisture_3_to_9cm");
     return `${API}?${params}`;
   }
   const getJSON = async url => {
@@ -515,13 +728,14 @@ if (typeof module !== "undefined") module.exports = Engine;
     const alt = autoAlt ? null : state.alt;
     try {
       const [mf, def] = await Promise.allSettled([
-        getJSON(buildUrl(state.place, alt, "meteofrance_seamless", false)),
-        getJSON(buildUrl(state.place, alt, null, true)),
+        getJSON(buildUrl(loc(), alt, "meteofrance_seamless", false)),
+        getJSON(buildUrl(loc(), alt, null, true)),
       ]);
       const D = Engine.mergeData(mf.status === "fulfilled" ? mf.value : null, def.status === "fulfilled" ? def.value : null);
       if (autoAlt && D.elevation != null) {
-        if (state.place.village == null) state.place.village = D.elevation;
+        if (state.place.village == null && !state.spot) state.place.village = D.elevation;
         setAlt(D.elevation);
+        syncSpotUI();
       }
       state.data = D; state.fetchedAt = Date.now();
       save();
@@ -547,26 +761,34 @@ if (typeof module !== "undefined") module.exports = Engine;
   const pct = x => `${Math.round(x * 100)}%`;
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-  function explain(r, sp, D, today) {
+  function explain(r, sp, D, today, out) {
     const items = [];
     const wl = r.W >= 0.7 ? "bonne" : r.W >= 0.4 ? "correcte" : "insuffisante";
     items.push(["Réserve en eau", r.W, `Réserve ${wl} : environ ${Math.round(r.store)} mm sur ${Engine.SOIL_CAP} dans le sol forestier, une fois déduites la pluie retenue par les arbres et l'évaporation${r.smPct != null ? ` (humidité du modèle : ${r.smPct} %)` : ""}.`]);
+    const expo = out.south > 0.1 ? ", versant ensoleillé" : out.south < -0.1 ? ", versant ombragé" : "";
     items.push(["Température du sol", r.T, r.st != null
-      ? `Sol à ${Math.round(r.st)} °C${r.stEst ? " (estimé d'après l'air)" : ""}, idéal entre ${sp.soil[0]} et ${sp.soil[1]} °C.`
+      ? `Sol forestier estimé à ${Math.round(r.st)} °C d'après l'air à ${state.alt} m${expo}. Idéal entre ${sp.soil[0]} et ${sp.soil[1]} °C.`
       : "Température du sol indisponible."]);
     let trig;
+    const span = e => { const day = k => fmtDM(addDays(D.time[e.end], k)); return `Avec la chaleur actuelle, sortie attendue du ${day(e.win[0])} au ${day(e.win[1])}`; };
     if (r.ep) {
       const fut = r.ep.end > today;
       const when = fut ? `prévue jusqu'au ${fmtDM(D.time[r.ep.end])}` : `terminée le ${fmtDM(D.time[r.ep.end])}`;
       const unsure = r.ep.conf < 1 ? ` Encore incertaine : probabilité ${r.ep.prob} %, l'indice en tient compte.` : "";
-      trig = `Pluie de ${Math.round(r.ep.mm)} mm ${r.ep.days > 1 ? `sur ${r.ep.days} jours ` : ""}${when} (il en fallait ${Math.round(r.ep.thr)} vu l'état du sol), soit ${r.ep.lag} j avant ce jour. Idéal : ${sp.lag[0]} à ${sp.lag[1]} j.${unsure}`;
+      trig = `Pluie de ${Math.round(r.ep.mm)} mm ${r.ep.days > 1 ? `sur ${r.ep.days} jours ` : ""}${when} (il en fallait ${Math.round(r.ep.thr)} vu l'état du sol). ${span(r.ep).replace(/\.?$/, ".")}${unsure}`;
     } else if (r.recent) {
-      const e = r.recent, day = k => fmtDM(addDays(D.time[e.end], k));
-      trig = `Pluie de ${Math.round(e.mm)} mm jusqu'au ${fmtDM(D.time[e.end])}, encore trop récente. Pousse attendue entre le ${day(sp.lag[0])} et le ${day(sp.lag[1])} si le temps le permet.`;
-    } else trig = `Aucun épisode pluvieux assez fort à la bonne distance. Sur un sol dans cet état, il faut environ ${Math.round(r.thrNow)} mm, ${sp.lag[0]} à ${sp.lag[1]} jours avant.`;
+      trig = `Pluie de ${Math.round(r.recent.mm)} mm jusqu'au ${fmtDM(D.time[r.recent.end])}, encore trop récente. ${span(r.recent)}, si le temps le permet.`;
+    } else trig = `Aucun épisode pluvieux assez fort à la bonne distance. Sur un sol dans cet état, il faut environ ${Math.round(r.thrNow)} mm, puis ${sp.lag[0]} à ${sp.lag[1]} jours de douceur (davantage si le sol est froid).`;
     if (r.shock) trig += ` Rafraîchissement de ${Math.round(r.shock)} °C, souvent déclencheur.`;
     items.push(["Déclencheur", r.Tr, trig]);
     items.push(["Saison", r.S, r.S >= 0.9 ? "En pleine saison." : r.S >= 0.4 ? "Début ou fin de saison." : r.S > 0 ? "En marge de saison, pousses rares." : "Hors saison."]);
+    const host = state.spot?.host;
+    const hTxt = !host ? "Essence non renseignée : place ton coin sur la carte."
+      : `${Engine.HOSTS[host]} : ${r.H >= 0.9 ? "très bon hôte" : r.H >= 0.6 ? "hôte possible" : r.H > 0.15 ? "hôte peu favorable" : "quasiment aucune chance"}.`;
+    const top = r.altTop == null ? null : Math.round(r.altTop / 50) * 50;
+    const aTxt = top == null ? "" : r.A >= 1 ? ` ${state.alt} m : dans sa plage d'altitude (jusqu'à ${top} m environ à cette latitude).`
+      : ` ${state.alt} m : au-dessus de son altitude habituelle (${top} m environ à cette latitude).`;
+    items.push(["Lieu", r.A * r.H, hTxt + aTxt]);
     const warns = [];
     if (r.frostF < 1) warns.push(`Gel ou froid marqué (${Math.round(r.tminR)} °C) : pousse freinée.`);
     if (r.heatF < 1) warns.push(`Fortes chaleurs (${Math.round(r.tmaxR)} °C) : le sol sèche vite.`);
@@ -574,7 +796,7 @@ if (typeof module !== "undefined") module.exports = Engine;
     return `<ul class="why">${items.map(([k, v, t]) => `<li><span class="k">${k}<span class="meter"><i style="width:${pct(v)}"></i></span></span><span class="t">${t}</span></li>`).join("")}${warns.map(w => `<li><span class="warn">${w}</span></li>`).join("")}</ul>`;
   }
 
-  function renderPlate(res, D, today) {
+  function renderPlate(res, D, today, out) {
     const { sp, days, best } = res;
     const sel = state.selected[sp.id] != null ? state.selected[sp.id] : best.d;
     const r = days.find(x => x.d === sel) || best;
@@ -593,14 +815,14 @@ if (typeof module !== "undefined") module.exports = Engine;
       </div>
       <details${state.open && state.open[sp.id] ? " open" : ""}>
         <summary>Pourquoi ${r.score} le ${r.d === today ? "jour même" : fmtLong(D.time[r.d])}</summary>
-        ${explain(r, sp, D, today)}
+        ${explain(r, sp, D, today, out)}
         ${far >= 4 ? `<p class="conf">Prévision à ${far} jours : fiabilité limitée.</p>` : far >= 2 ? `<p class="conf">Prévision à ${far} jours : fiabilité moyenne.</p>` : ""}
       </details>`;
     el.querySelectorAll(".day").forEach(b => b.addEventListener("click", () => {
       state.selected[sp.id] = +b.dataset.d;
       const det = el.querySelector("details");
       state.open = state.open || {}; state.open[sp.id] = det.open;
-      const fresh = renderPlate(res, D, today);
+      const fresh = renderPlate(res, D, today, out);
       fresh.style.animation = "none";
       el.replaceWith(fresh);
       fresh.querySelector(`.day[data-d="${b.dataset.d}"]`).focus();
@@ -614,7 +836,16 @@ if (typeof module !== "undefined") module.exports = Engine;
     for (const s of out.species) for (const d of s.days) if (!top || d.score > top.r.score) top = { s, r: d };
     const box = $("#best");
     if (!top || top.r.score < 25) {
-      box.innerHTML = `<p>Pas de pousse marquée attendue cette semaine.</p><p class="sub">Il manque de l'eau, un épisode pluvieux déclencheur ou la saison n'y est pas. Une bonne pluie (15 mm sur sol humide, jusqu'à 40 mm après une sécheresse) relancerait les choses une dizaine de jours plus tard.</p>`;
+      // Pousses attendues après la semaine affichée, d'après le dernier jour calculé.
+      const lastD = out.species[0].days.at(-1).d;
+      const later = out.species.map(s => ({ s, r: s.days.at(-1) }))
+        .map(({ s, r }) => ({ s, r, e: r.recent || r.ep }))
+        .filter(({ r, e }) => e && e.end + e.win[1] > lastD && r.A * r.H >= 0.5 && r.S > 0)
+        .sort((x, y) => x.e.end + x.e.win[0] - (y.e.end + y.e.win[0]));
+      const span = e => `entre le ${fmtDM(addDays(D.time[e.end], e.win[0]))} et le ${fmtDM(addDays(D.time[e.end], e.win[1]))}`;
+      box.innerHTML = later.length
+        ? `<p>Pas encore de pousse cette semaine, mais la pluie jusqu'au ${fmtDM(D.time[later[0].e.end])} devrait relancer la saison.</p><p class="sub">Sorties attendues : ${later.map(({ s, e }) => `${esc(s.sp.name.toLowerCase())} ${span(e)}`).join(", ")}, si le temps reste doux et humide.</p>`
+        : `<p>Pas de pousse marquée attendue cette semaine.</p><p class="sub">Il manque de l'eau, un épisode pluvieux déclencheur ou la saison n'y est pas. Une bonne pluie (15 mm sur sol humide, jusqu'à 40 mm après une sécheresse) relancerait les choses une dizaine de jours plus tard.</p>`;
       return;
     }
     const when = top.r.d === today ? "dès aujourd'hui" : fmtLong(D.time[top.r.d]);
@@ -661,12 +892,12 @@ if (typeof module !== "undefined") module.exports = Engine;
 
   function render() {
     const D = state.data; if (!D) return;
-    const out = Engine.compute(D);
+    const out = Engine.compute(D, spotArg());
     const today = out.today;
     renderBest(out, D, today);
     const plates = $("#plates"); plates.innerHTML = "";
     // Espèces triées par meilleur indice de la semaine
-    [...out.species].sort((a, b) => b.best.score - a.best.score).forEach(res => plates.appendChild(renderPlate(res, D, today)));
+    [...out.species].sort((a, b) => b.best.score - a.best.score).forEach(res => plates.appendChild(renderPlate(res, D, today, out)));
     renderWeather(D, today, out.store);
     $("#results").hidden = false;
     const t = new Date(state.fetchedAt);
@@ -676,14 +907,16 @@ if (typeof module !== "undefined") module.exports = Engine;
   /* ---------- Démarrage ---------- */
   const saved = load();
   if (saved && saved.place) {
-    state.place = saved.place; state.data = saved.data; state.fetchedAt = saved.fetchedAt;
+    state.place = saved.place; state.spot = saved.spot || null; state.data = saved.data; state.fetchedAt = saved.fetchedAt;
     q.value = saved.place.name + (saved.place.admin ? `, ${saved.place.admin}` : "");
     setAlt(saved.alt != null ? saved.alt : 800);
+    syncSpotUI();
     if (state.data) render();
     if (!state.fetchedAt || Date.now() - state.fetchedAt > 60 * 60 * 1000) fetchWeather();
   } else {
     state.place = { ...DEFAULT_PLACE };
     q.value = `${DEFAULT_PLACE.name}, ${DEFAULT_PLACE.admin}`;
+    syncSpotUI();
     fetchWeather(true);
   }
 })();
